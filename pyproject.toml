@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "multi-agent-workflow"
+version = "0.1.0"
+description = "Production multi-agent AI Research Assistant powered by LangGraph, Claude, and Tavily"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # LangGraph core
+    "langgraph>=0.2.50",
+    "langgraph-checkpoint-postgres>=1.0.4",
+
+    # LangChain ecosystem
+    "langchain>=0.3.0",
+    "langchain-anthropic>=0.3.0",
+    "langchain-community>=0.3.0",
+
+    # Web search
+    "tavily-python>=0.5.0",
+
+    # Database
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.0",
+
+    # Config & validation
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+
+    # HTTP & scraping
+    "httpx>=0.27.0",
+    "beautifulsoup4>=4.12.0",
+
+    # CLI & display
+    "click>=8.1.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-mock>=3.12.0",
+    "aiosqlite>=0.20.0",
+]
+
+[project.scripts]
+research = "main:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*", "config*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
