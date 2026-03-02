@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -14,22 +15,52 @@ from src.state import NodeCost, Report, ResearchState
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM = """You are a research analyst. Given a research query, a research plan,
-and summaries of multiple web sources, synthesize a comprehensive research report.
+_SYSTEM = """You are a research analyst. Synthesize the provided source summaries into a report.
 
-Respond ONLY with valid JSON in this exact format:
+Respond ONLY with valid JSON — no markdown, no code fences, no extra text:
 {
-  "executive_summary": "2-3 sentence overview",
-  "key_findings": ["finding 1", "finding 2", "finding 3", ...],
+  "executive_summary": "2 sentences max",
+  "key_findings": ["finding 1", "finding 2", "finding 3"],
   "sources": [
-    {"url": "...", "title": "...", "key_contribution": "one sentence"}
+    {"url": "...", "title": "...", "key_contribution": "10 words max"}
   ],
   "metadata": {
     "num_sources": <int>,
     "confidence": "high|medium|low",
-    "gaps": "any notable gaps in the research"
+    "gaps": "one sentence"
   }
 }"""
+
+
+def _parse_json(text: str) -> dict:
+    """Extract and parse JSON from LLM output robustly.
+
+    Handles: raw JSON, ```json ... ``` fences, leading/trailing noise.
+    """
+    # 1. Try direct parse
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # 2. Strip ```json ... ``` or ``` ... ``` code fences
+    fenced = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+    if fenced:
+        try:
+            return json.loads(fenced.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+
+    # 3. Extract from first { to last }
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        try:
+            return json.loads(text[start:end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError(f"Could not extract valid JSON. Response: {text[:200]!r}")
 
 
 async def synthesizer_node(state: ResearchState) -> dict:
@@ -67,7 +98,7 @@ async def synthesizer_node(state: ResearchState) -> dict:
         model=settings.model_name,
         api_key=settings.groq_api_key,
         temperature=0,
-        max_tokens=2048,
+        max_tokens=4096,
     )
 
     node_cost: NodeCost | None = None
@@ -77,7 +108,7 @@ async def synthesizer_node(state: ResearchState) -> dict:
         response = await llm.ainvoke(
             [SystemMessage(content=_SYSTEM), HumanMessage(content=user_msg)]
         )
-        report_data = json.loads(response.content)
+        report_data = _parse_json(response.content)
         cost = tracker.record_from_message("synthesizer", response)
         node_cost = NodeCost(
             node=cost.node,
