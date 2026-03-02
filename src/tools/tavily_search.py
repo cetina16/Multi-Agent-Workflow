@@ -1,43 +1,20 @@
-"""Async Tavily web search with retry + DuckDuckGo fallback."""
+"""Web search via DuckDuckGo — free, no API key required."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-
-import httpx
-from tavily import AsyncTavilyClient
+from concurrent.futures import ThreadPoolExecutor
 
 from config import get_settings
 from src.state import SearchResult
 
 logger = logging.getLogger(__name__)
 
-
-async def _duckduckgo_fallback(query: str, max_results: int) -> list[SearchResult]:
-    """Minimal DuckDuckGo fallback via instant-answer API (no API key required)."""
-    results: list[SearchResult] = []
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                "https://api.duckduckgo.com/",
-                params={"q": query, "format": "json", "no_redirect": "1"},
-            )
-            data = resp.json()
-            # RelatedTopics contains result snippets
-            for topic in data.get("RelatedTopics", [])[:max_results]:
-                if "FirstURL" in topic and "Text" in topic:
-                    results.append(
-                        SearchResult(
-                            url=topic["FirstURL"],
-                            title=topic.get("Text", "")[:100],
-                            content=topic.get("Text", ""),
-                            score=0.5,
-                        )
-                    )
-    except Exception as exc:
-        logger.warning("DuckDuckGo fallback failed: %s", exc)
-    return results
+# Dedicated single-worker executor so only one DDG thread runs at a time.
+# asyncio.wait_for cannot cancel running threads, so we must prevent thread
+# pool exhaustion by ensuring searches never run concurrently.
+_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ddg")
 
 
 async def search_web(
@@ -46,46 +23,48 @@ async def search_web(
     max_results: int | None = None,
     max_retries: int | None = None,
 ) -> list[SearchResult]:
-    """Search the web via Tavily with exponential-backoff retry and DDG fallback.
+    """Search the web using DuckDuckGo (free, no API key).
 
-    Returns a list of SearchResult dicts sorted by relevance score descending.
+    DDGS has a built-in HTTP timeout (default 10 s). We rely on that rather
+    than asyncio.wait_for, because wait_for cannot cancel an already-running
+    thread — it only cancels the asyncio Future, leaving the thread alive and
+    blocking the pool.
     """
     settings = get_settings()
     max_results = max_results or settings.max_search_results
     max_retries = max_retries or settings.max_retries
 
-    client = AsyncTavilyClient(api_key=settings.tavily_api_key)
+    def _sync_search() -> list[dict]:
+        from ddgs import DDGS
+        # timeout= caps each HTTP request; DDGS raises an exception if exceeded
+        with DDGS(timeout=10) as ddgs:
+            return list(ddgs.text(query, max_results=max_results))
 
+    loop = asyncio.get_event_loop()
     last_exc: Exception | None = None
     for attempt in range(max_retries):
         try:
-            response = await client.search(
-                query,
-                max_results=max_results,
-                search_depth="advanced",
-                include_answer=False,
-            )
-            raw = response.get("results", [])
-            return [
+            raw = await loop.run_in_executor(_EXECUTOR, _sync_search)
+            results = [
                 SearchResult(
-                    url=r.get("url", ""),
+                    url=r.get("href", ""),
                     title=r.get("title", ""),
-                    content=r.get("content", ""),
-                    score=float(r.get("score", 0.0)),
+                    content=r.get("body", ""),
+                    score=round(1.0 - (i * 0.05), 2),
                 )
-                for r in raw
+                for i, r in enumerate(raw)
+                if r.get("href")
             ]
+            logger.info("DuckDuckGo returned %d results for '%s'", len(results), query)
+            return results
         except Exception as exc:
             last_exc = exc
-            wait = 2**attempt
+            wait = 2 ** attempt
             logger.warning(
-                "Tavily search attempt %d/%d failed (%s). Retrying in %ds…",
-                attempt + 1,
-                max_retries,
-                exc,
-                wait,
+                "DDG search attempt %d/%d failed (%s). Retrying in %ds…",
+                attempt + 1, max_retries, exc, wait,
             )
             await asyncio.sleep(wait)
 
-    logger.error("All Tavily retries exhausted. Using DuckDuckGo fallback.")
-    return await _duckduckgo_fallback(query, max_results)
+    logger.error("All search retries exhausted for '%s': %s", query, last_exc)
+    return []

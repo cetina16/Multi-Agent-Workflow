@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from config import get_settings
@@ -29,13 +28,15 @@ async def searcher_node(state: ResearchState) -> dict:
             ],
         }
 
-    # Fan out: run all queries concurrently
-    tasks = [
-        search_web(q, max_results=settings.max_search_results)
-        for q in search_queries
-    ]
-
-    results_per_query = await asyncio.gather(*tasks, return_exceptions=True)
+    # Run searches sequentially — concurrent DDG requests cause thread pool
+    # exhaustion because asyncio.wait_for cannot cancel running threads.
+    results_per_query = []
+    for q in search_queries:
+        try:
+            result = await search_web(q, max_results=settings.max_search_results)
+            results_per_query.append(result)
+        except Exception as exc:
+            results_per_query.append(exc)
 
     all_results: list[SearchResult] = []
     for query, result in zip(search_queries, results_per_query):

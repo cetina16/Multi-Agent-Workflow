@@ -23,7 +23,7 @@ async def test_planner_returns_plan_and_queries(base_state):
         queries=["quantum computing 2024", "quantum error correction breakthroughs"],
     )
 
-    with patch("src.agents.planner.ChatAnthropic") as MockLLM:
+    with patch("src.agents.planner.ChatGroq") as MockLLM:
         MockLLM.return_value.ainvoke = AsyncMock(return_value=mock_resp)
         result = await planner_node(base_state)
 
@@ -41,7 +41,7 @@ async def test_planner_incorporates_feedback(base_state):
         queries=["quantum computing practical applications industry"],
     )
 
-    with patch("src.agents.planner.ChatAnthropic") as MockLLM:
+    with patch("src.agents.planner.ChatGroq") as MockLLM:
         instance = MockLLM.return_value
         instance.ainvoke = AsyncMock(return_value=mock_resp)
         result = await planner_node(base_state)
@@ -55,7 +55,7 @@ async def test_planner_incorporates_feedback(base_state):
 
 @pytest.mark.asyncio
 async def test_planner_fallback_on_llm_error(base_state):
-    with patch("src.agents.planner.ChatAnthropic") as MockLLM:
+    with patch("src.agents.planner.ChatGroq") as MockLLM:
         MockLLM.return_value.ainvoke = AsyncMock(side_effect=Exception("LLM error"))
         result = await planner_node(base_state)
 

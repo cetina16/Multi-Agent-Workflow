@@ -6,7 +6,9 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Any
+import warnings
+
+warnings.filterwarnings("ignore", category=ResourceWarning)
 
 import click
 from rich.console import Console
@@ -15,6 +17,7 @@ from rich.table import Table
 
 from config import get_settings
 from src.cost_tracker import CostTracker
+from src.database.engine import init_db
 from src.graph import build_graph
 from src.memory import get_checkpointer
 
@@ -84,8 +87,9 @@ def _display_costs(node_costs: list[dict]) -> None:
 
 async def _run_research(query: str, session_id: str, auto_approve: bool) -> None:
     settings = get_settings()
+    await init_db()  # Create SQLite tables if they don't exist yet
 
-    with get_checkpointer(settings.sync_database_url) as checkpointer:
+    async with get_checkpointer(settings.sqlite_path) as checkpointer:
         graph = build_graph(checkpointer=checkpointer)
         config = {"configurable": {"thread_id": session_id}}
 
@@ -110,11 +114,11 @@ async def _run_research(query: str, session_id: str, auto_approve: bool) -> None
 
         # Run until the first interrupt (human_review)
         async for event in graph.astream(initial_state, config, stream_mode="updates"):
-            for node_name, update in event.items():
+            for node_name in event:
                 console.print(f"  [dim]→ {node_name}[/dim]")
 
-        # Check if graph is waiting at human_review
-        current = graph.get_state(config)
+        # Check if graph is waiting at human_review — use async aget_state
+        current = await graph.aget_state(config)
         if current.next and "human_review" in current.next:
             state_vals = current.values
             plan = state_vals.get("plan", [])
@@ -136,14 +140,15 @@ async def _run_research(query: str, session_id: str, auto_approve: bool) -> None
                     default="approved",
                 )
 
-            # Inject feedback and resume
-            graph.update_state(config, {"human_feedback": feedback})
+            # Inject feedback and resume — use async aupdate_state
+            await graph.aupdate_state(config, {"human_feedback": feedback})
             async for event in graph.astream(None, config, stream_mode="updates"):
-                for node_name, update in event.items():
+                for node_name in event:
                     console.print(f"  [dim]→ {node_name}[/dim]")
 
-        # Fetch final state
-        final_state = graph.get_state(config).values
+        # Fetch final state — use async aget_state
+        final = await graph.aget_state(config)
+        final_state = final.values
         report = final_state.get("final_report")
         node_costs = final_state.get("node_costs", [])
         errors = final_state.get("error_log", [])
@@ -162,7 +167,7 @@ async def _run_research(query: str, session_id: str, auto_approve: bool) -> None
 
 @click.group()
 def cli() -> None:
-    """Multi-Agent AI Research Assistant powered by LangGraph + Claude."""
+    """Multi-Agent AI Research Assistant powered by LangGraph + Groq (free)."""
 
 
 @cli.command()
@@ -179,11 +184,11 @@ def research(query: str, session_id: str | None, auto_approve: bool, output_json
 
         if output_json:
             settings = get_settings()
-            with get_checkpointer(settings.sync_database_url) as checkpointer:
+            async with get_checkpointer(settings.sqlite_path) as checkpointer:
                 graph = build_graph(checkpointer=checkpointer)
                 config = {"configurable": {"thread_id": sid}}
-                state = graph.get_state(config).values
-                report = state.get("final_report")
+                state_snapshot = await graph.aget_state(config)
+                report = state_snapshot.values.get("final_report")
                 if report:
                     with open(output_json, "w") as f:
                         json.dump(dict(report), f, indent=2)
@@ -200,20 +205,20 @@ def resume(session_id: str, feedback: str) -> None:
     settings = get_settings()
 
     async def _main():
-        with get_checkpointer(settings.sync_database_url) as checkpointer:
+        async with get_checkpointer(settings.sqlite_path) as checkpointer:
             graph = build_graph(checkpointer=checkpointer)
             config = {"configurable": {"thread_id": session_id}}
 
-            graph.update_state(config, {"human_feedback": feedback})
+            await graph.aupdate_state(config, {"human_feedback": feedback})
             console.print(f"[dim]Resuming session {session_id} with feedback: {feedback}[/dim]")
 
             async for event in graph.astream(None, config, stream_mode="updates"):
                 for node_name in event:
                     console.print(f"  [dim]→ {node_name}[/dim]")
 
-            final_state = graph.get_state(config).values
-            report = final_state.get("final_report")
-            node_costs = final_state.get("node_costs", [])
+            final = await graph.aget_state(config)
+            report = final.values.get("final_report")
+            node_costs = final.values.get("node_costs", [])
 
             if report:
                 _display_report(dict(report))
@@ -229,21 +234,24 @@ def cost_report(session_id: str) -> None:
     """Display the cost breakdown for a completed session."""
     settings = get_settings()
 
-    with get_checkpointer(settings.sync_database_url) as checkpointer:
-        graph = build_graph(checkpointer=checkpointer)
-        config = {"configurable": {"thread_id": session_id}}
-        state = graph.get_state(config)
+    async def _main():
+        async with get_checkpointer(settings.sqlite_path) as checkpointer:
+            graph = build_graph(checkpointer=checkpointer)
+            config = {"configurable": {"thread_id": session_id}}
+            state_snapshot = await graph.aget_state(config)
 
-        if not state or not state.values:
-            console.print(f"[red]No state found for session {session_id}[/red]")
-            return
+            if not state_snapshot or not state_snapshot.values:
+                console.print(f"[red]No state found for session {session_id}[/red]")
+                return
 
-        node_costs = state.values.get("node_costs", [])
-        if not node_costs:
-            console.print("[yellow]No cost data recorded for this session.[/yellow]")
-            return
+            node_costs = state_snapshot.values.get("node_costs", [])
+            if not node_costs:
+                console.print("[yellow]No cost data recorded for this session.[/yellow]")
+                return
 
-        _display_costs(node_costs)
+            _display_costs(node_costs)
+
+    asyncio.run(_main())
 
 
 if __name__ == "__main__":

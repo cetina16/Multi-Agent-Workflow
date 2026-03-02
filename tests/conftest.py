@@ -8,10 +8,8 @@ import uuid
 import pytest
 
 # Point to test environment defaults before any app imports
-os.environ.setdefault("ANTHROPIC_API_KEY", "sk-ant-test-key")
-os.environ.setdefault("TAVILY_API_KEY", "tvly-test-key")
-os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://postgres:password@localhost:5432/research_db_test")
-os.environ.setdefault("SYNC_DATABASE_URL", "postgresql://postgres:password@localhost:5432/research_db_test")
+os.environ.setdefault("GROQ_API_KEY", "gsk_test_key")
+os.environ.setdefault("SQLITE_PATH", ":memory:")
 
 
 @pytest.fixture

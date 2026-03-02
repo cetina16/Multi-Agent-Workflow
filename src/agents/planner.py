@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 
-from langchain_anthropic import ChatAnthropic
+from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from config import get_settings
@@ -15,13 +15,13 @@ from src.state import NodeCost, ResearchState
 logger = logging.getLogger(__name__)
 
 _SYSTEM = """You are a research planning expert. Given a research query, decompose it into:
-1. A list of focused sub-tasks (2-4 items)
-2. A list of specific web search queries (3-6 items) to gather information
+1. A list of focused sub-tasks (2-3 items)
+2. A list of specific web search queries (exactly 3 items, no more) to gather information
 
 Respond ONLY with valid JSON in this exact format:
 {
-  "plan": ["sub-task 1", "sub-task 2", ...],
-  "search_queries": ["query 1", "query 2", ...]
+  "plan": ["sub-task 1", "sub-task 2"],
+  "search_queries": ["query 1", "query 2", "query 3"]
 }"""
 
 
@@ -42,9 +42,9 @@ async def planner_node(state: ResearchState) -> dict:
             "Please adjust the research plan based on this feedback."
         )
 
-    llm = ChatAnthropic(
+    llm = ChatGroq(
         model=settings.model_name,
-        api_key=settings.anthropic_api_key,
+        api_key=settings.groq_api_key,
         temperature=0,
     )
 

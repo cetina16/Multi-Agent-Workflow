@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from langchain_anthropic import ChatAnthropic
+from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from config import get_settings
@@ -30,9 +30,9 @@ async def summarizer_node(state: dict) -> dict:
     source: Source = state["source"]
     query: str = state.get("query", "")
 
-    llm = ChatAnthropic(
+    llm = ChatGroq(
         model=settings.model_name,
-        api_key=settings.anthropic_api_key,
+        api_key=settings.groq_api_key,
         temperature=0,
         max_tokens=512,
     )

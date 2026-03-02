@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 
-from langchain_anthropic import ChatAnthropic
+from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from config import get_settings
@@ -63,9 +63,9 @@ async def synthesizer_node(state: ResearchState) -> dict:
         f"Source summaries:\n{summaries_text}"
     )
 
-    llm = ChatAnthropic(
+    llm = ChatGroq(
         model=settings.model_name,
-        api_key=settings.anthropic_api_key,
+        api_key=settings.groq_api_key,
         temperature=0,
         max_tokens=2048,
     )

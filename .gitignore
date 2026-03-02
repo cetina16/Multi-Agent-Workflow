@@ -47,6 +47,16 @@ coverage.xml
 # Alembic
 alembic/versions/__pycache__/
 
+# SQLite databases (runtime data — not for version control)
+*.db
+*.db-shm
+*.db-wal
+
+# Report output files
+*.json
+!package.json
+!tsconfig.json
+
 # LangGraph / LangSmith
 .langgraph/
 
