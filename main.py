@@ -23,6 +23,7 @@ from src.memory import get_checkpointer
 
 console = Console()
 logging.basicConfig(level=logging.WARNING)
+logging.getLogger("primp").setLevel(logging.ERROR)
 
 
 def _display_report(report: dict) -> None:
@@ -46,12 +47,13 @@ def _display_report(report: dict) -> None:
     if sources:
         table = Table(title="Sources", show_lines=True)
         table.add_column("Title", style="cyan", max_width=40)
-        table.add_column("URL", style="dim", max_width=50)
+        table.add_column("URL", no_wrap=True)
         table.add_column("Contribution", max_width=60)
         for s in sources:
+            url = s.get("url", "")
             table.add_row(
                 s.get("title", ""),
-                s.get("url", ""),
+                f"[link={url}]{url}[/link]",
                 s.get("key_contribution", ""),
             )
         console.print()
@@ -150,14 +152,10 @@ async def _run_research(query: str, session_id: str, auto_approve: bool) -> None
         final = await graph.aget_state(config)
         final_state = final.values
         report = final_state.get("final_report")
-        node_costs = final_state.get("node_costs", [])
         errors = final_state.get("error_log", [])
 
         if report:
             _display_report(dict(report))
-
-        if node_costs:
-            _display_costs(node_costs)
 
         if errors:
             console.print("\n[bold red]Errors encountered:[/bold red]")
@@ -218,12 +216,9 @@ def resume(session_id: str, feedback: str) -> None:
 
             final = await graph.aget_state(config)
             report = final.values.get("final_report")
-            node_costs = final.values.get("node_costs", [])
 
             if report:
                 _display_report(dict(report))
-            if node_costs:
-                _display_costs(node_costs)
 
     asyncio.run(_main())
 
